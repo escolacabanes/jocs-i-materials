@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Prèstec de jocs i material</title>
+<title>Ludoteca del Cole</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 <style>
@@ -141,13 +141,25 @@
   .loan-form .row{ display:flex; gap:8px; }
   .loan-form .row .btn{ flex:1; justify-content:center; }
 
-  .card-manage{ display:flex; gap:6px; justify-content:flex-end; }
+  .card-manage{ display:flex; gap:6px; justify-content:space-between; align-items:center; }
+  .card-manage-right{ display:flex; gap:6px; }
   .icon-btn{
     background:transparent; border:none; color:var(--ink-faint); cursor:pointer;
     padding:4px; border-radius:6px; display:flex; align-items:center;
   }
   .icon-btn:hover{ color:var(--ink); background:var(--surface-alt); }
   .icon-btn svg{ width:15px; height:15px; }
+
+  .incidents{ display:flex; flex-direction:column; gap:5px; }
+  .incident-item{
+    display:flex; align-items:center; gap:5px; background:var(--status-loaned-bg);
+    color:var(--status-loaned-fg); border-radius:8px; padding:6px 9px; font-size:12.5px;
+  }
+  .incident-by{ color:var(--ink-faint); font-style:italic; }
+  .incident-resolve{ margin-left:auto; color:var(--status-loaned-fg); }
+  .incident-resolve:hover{ color:var(--ink); }
+
+  .issue-list{ display:flex; flex-direction:column; gap:8px; }
 
   .overlay{
     position:fixed; inset:0; background:rgba(20,26,19,0.45);
@@ -234,14 +246,14 @@
         </svg>
         <div>
           <h1>Ludoteca del cole</h1>
-          <p class="subtitle">Prèstec de jocs de taula i material entre docents del CEIP Cabanes de mesa entre docentes</p>
+          <p class="subtitle">Préstamo de juegos de mesa entre docentes</p>
           <p class="whoami" id="whoami-slot"></p>
         </div>
       </div>
       <div class="top-actions">
-        <button class="btn btn-ghost" id="btn-teachers" type="button">Gestionar docents</button>
-        <button class="btn" id="btn-scan" type="button">📷 Escanejar còdig</button>
-        <button class="btn btn-primary" id="btn-add-game" type="button">+ Afegir joc</button>
+        <button class="btn btn-ghost" id="btn-teachers" type="button">Gestionar docentes</button>
+        <button class="btn" id="btn-scan" type="button">📷 Escanear código</button>
+        <button class="btn btn-primary" id="btn-add-game" type="button">+ Añadir juego</button>
       </div>
     </div>
     <div class="filters">
@@ -291,13 +303,17 @@ const ACCESS_KEY = "jocs1234";
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
-  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot
+  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, arrayUnion, arrayRemove
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const gamesCol = collection(db, "games");
 const teachersRef = doc(db, "config", "teachers");
+
+// Quién puede añadir, editar, borrar juegos y resolver incidencias.
+const ADMIN_TEACHERS = ["Alba"];
+const ISSUE_TYPES = ["Caja deteriorada", "Faltan piezas", "Tablero roto", "Instrucciones incompletas"];
 
 const LS_PIN = "ludoteca_pin_ok";
 const LS_NAME = "ludoteca_docente";
@@ -345,6 +361,7 @@ function uniqueSorted(list){
   return out;
 }
 function currentTeacher(){ return localStorage.getItem(LS_NAME) || ""; }
+function isAdmin(){ return ADMIN_TEACHERS.indexOf(currentTeacher()) !== -1; }
 
 /* ---------------- PIN gate ---------------- */
 function renderPinGate(){
@@ -438,6 +455,7 @@ function renderWhoami(){
     localStorage.removeItem(LS_NAME);
     renderOnboardingIfNeeded();
   });
+  document.getElementById("btn-add-game").style.display = isAdmin() ? "" : "none";
 }
 
 /* ---------------- Catalogue rendering ---------------- */
@@ -498,19 +516,37 @@ function cardHtml(g){
     footer = '<div class="card-foot"><button class="btn btn-primary btn-sm" data-action="start-loan" data-id="'+esc(g.id)+'" type="button">Prestar</button></div>';
   }
   var cover = g.imagen ? '<img class="card-cover" src="'+esc(g.imagen)+'" alt="">' : '';
+  var incidencias = g.incidencias || [];
+  var incidentsHtml = incidencias.length ? (
+    '<div class="incidents">' +
+      incidencias.map(function(inc, i){
+        return '<div class="incident-item">⚠ '+esc(inc.tipo)+' <span class="incident-by">— '+esc(inc.reportadoPor||"")+'</span>' +
+          (isAdmin() ? '<button class="icon-btn incident-resolve" data-action="resolve-incident" data-id="'+esc(g.id)+'" data-index="'+i+'" title="Marcar como arreglado" type="button">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 6 9 17l-5-5"/></svg></button>' : '') +
+          '</div>';
+      }).join("") +
+    '</div>'
+  ) : '';
+  var manageHtml = isAdmin() ? (
+    '<button class="icon-btn" data-action="edit" data-id="'+esc(g.id)+'" title="Editar juego" type="button">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+    '</button>' +
+    '<button class="icon-btn" data-action="delete" data-id="'+esc(g.id)+'" title="Eliminar juego" type="button">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>' +
+    '</button>'
+  ) : '';
   return (
     '<div class="card">' +
       cover +
       '<div class="card-head"><h3 class="card-title">'+esc(g.nombre)+'</h3>'+statusPill+'</div>' +
       (cursos || materias || codeTag ? '<div class="tags">'+cursos+materias+codeTag+'</div>' : '') +
+      incidentsHtml +
       loanInfo + footer +
       '<div class="card-manage">' +
-        '<button class="icon-btn" data-action="edit" data-id="'+esc(g.id)+'" title="Editar juego" type="button">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+        '<button class="icon-btn" data-action="report-issue" data-id="'+esc(g.id)+'" title="Reportar desperfecto" type="button">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>' +
         '</button>' +
-        '<button class="icon-btn" data-action="delete" data-id="'+esc(g.id)+'" title="Eliminar juego" type="button">' +
-          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>' +
-        '</button>' +
+        '<span class="card-manage-right">'+manageHtml+'</span>' +
       '</div>' +
     '</div>'
   );
@@ -523,8 +559,9 @@ function render(){
   if(games.length === 0){
     gridSlot.innerHTML =
       '<div class="empty"><div class="glyph">🎲</div><h2>Aún no hay juegos</h2>' +
-      '<p>Añade el primer juego de la ludoteca para empezar a gestionarlo.</p>' +
-      '<button class="btn btn-primary" id="empty-add" type="button">+ Añadir juego</button></div>';
+      '<p>'+(isAdmin() ? "Añade el primer juego de la ludoteca para empezar a gestionarlo." : "Todavía no se ha añadido ningún juego a la ludoteca.")+'</p>' +
+      (isAdmin() ? '<button class="btn btn-primary" id="empty-add" type="button">+ Añadir juego</button>' : '') +
+      '</div>';
     var eb = document.getElementById("empty-add");
     if(eb) eb.addEventListener("click", function(){ openGameModal("add"); });
     return;
@@ -555,6 +592,22 @@ function renderModal(){
           '<button class="btn btn-primary btn-sm" id="add-teacher-btn" type="button">Añadir</button>' +
         '</div>' +
         '<div class="modal-actions"><button class="btn" id="close-modal" type="button">Cerrar</button></div>' +
+      '</div></div>';
+  } else if(modalMode === "report"){
+    var rg = editingGame;
+    modalSlot.innerHTML =
+      '<div class="overlay" id="overlay"><div class="modal">' +
+        '<h2>Reportar desperfecto</h2>' +
+        '<p class="hint">'+esc(rg.nombre)+' — quedará visible en la ficha para todo el mundo.</p>' +
+        '<div class="issue-list">' +
+          ISSUE_TYPES.map(function(t){ return '<button class="btn btn-block" data-issue="'+esc(t)+'" type="button">'+esc(t)+'</button>'; }).join("") +
+        '</div>' +
+        '<div class="field" style="margin-top:14px;"><label for="issue-other">Otro</label>' +
+          '<input type="text" id="issue-other" placeholder="Describe el problema"></div>' +
+        '<div class="modal-actions">' +
+          '<button class="btn" id="close-modal" type="button">Cancelar</button>' +
+          '<button class="btn btn-primary" id="issue-other-btn" type="button">Reportar</button>' +
+        '</div>' +
       '</div></div>';
   } else {
     var isEdit = modalMode === "edit";
@@ -597,6 +650,20 @@ function renderModal(){
     var input = document.getElementById("new-teacher");
     input.addEventListener("keydown", function(e){ if(e.key === "Enter") addTeacherFromInput(); });
     input.focus();
+  } else if(modalMode === "report"){
+    var reportGameId = editingGame.id;
+    Array.prototype.forEach.call(modalSlot.querySelectorAll("[data-issue]"), function(btn){
+      btn.addEventListener("click", function(){
+        reportIncident(reportGameId, btn.getAttribute("data-issue"));
+        closeModal();
+      });
+    });
+    document.getElementById("issue-other-btn").addEventListener("click", function(){
+      var v = document.getElementById("issue-other").value.trim();
+      if(!v) return;
+      reportIncident(reportGameId, v);
+      closeModal();
+    });
   } else {
     document.getElementById("save-game").addEventListener("click", saveGameFromModal);
     document.getElementById("g-nombre").focus();
@@ -610,6 +677,15 @@ function renderModal(){
 }
 function closeModal(){ modalMode = null; editingGame = null; modalImageData = undefined; renderModal(); }
 function openGameModal(mode, game){ modalMode = mode; editingGame = game || null; modalImageData = undefined; renderModal(); }
+function openReportModal(game){ modalMode = "report"; editingGame = game; renderModal(); }
+function reportIncident(gameId, tipo){
+  updateDoc(doc(db, "games", gameId), {
+    incidencias: arrayUnion({ tipo:tipo, reportadoPor:currentTeacher(), fecha:new Date().toISOString() })
+  });
+}
+function resolveIncident(gameId, incident){
+  updateDoc(doc(db, "games", gameId), { incidencias: arrayRemove(incident) });
+}
 
 function resizeImageFile(file, maxWidth, quality){
   return new Promise(function(resolve, reject){
@@ -791,6 +867,15 @@ gridSlot.addEventListener("click", function(e){
   else if(action === "delete"){
     var game2 = games.find(function(g){ return g.id === id; });
     if(game2 && confirm('¿Eliminar "'+game2.nombre+'" de la ludoteca?')) deleteDoc(doc(db, "games", id));
+  }
+  else if(action === "report-issue"){
+    var game3 = games.find(function(g){ return g.id === id; });
+    if(game3) openReportModal(game3);
+  }
+  else if(action === "resolve-incident"){
+    var idx = parseInt(btn.getAttribute("data-index"), 10);
+    var game4 = games.find(function(g){ return g.id === id; });
+    if(game4 && game4.incidencias && game4.incidencias[idx]) resolveIncident(id, game4.incidencias[idx]);
   }
 });
 modalSlot.addEventListener("click", function(e){
